@@ -54,6 +54,8 @@ svg.chart{width:100%;height:auto;max-height:190px;color:var(--chu);display:block
 .kieu{display:flex;gap:14px;margin-bottom:2px;overflow-x:auto}
 .kieu button{background:none;border:0;border-bottom:2px solid transparent;font:inherit;font-size:13px;padding:2px 0;cursor:pointer;color:var(--chu);white-space:nowrap}
 .kieu button.on{border-color:#f2b705;font-weight:700}
+#diachi{color:#fff;text-shadow:0 1px 3px #0008;font-size:13px;padding:0 4px 6px}
+#diachi:empty{display:none}
 </style>
 </head>
 <body>
@@ -92,6 +94,7 @@ svg.chart{width:100%;height:auto;max-height:190px;color:var(--chu);display:block
     </div>
   </div>
   <div class="tabs" id="tabs"></div>
+  <div id="diachi"></div>
   <div class="box tim" id="tim" hidden>
     <button class="dong" id="dongBtn" data-i="close"></button>
     <h2 data-i="findTitle"></h2>
@@ -115,7 +118,7 @@ vi:{
   none:"Không tìm thấy. Thử gõ tên khác.", netErr:"Không tìm được. Hãy kiểm tra kết nối mạng.",
   locating:"Đang lấy vị trí của bạn...", noLoc:"Chưa lấy được vị trí. Hãy cho phép trình duyệt truy cập vị trí rồi tải lại trang.",
   loading:"Đang tải dữ liệu...", loadErr:"Không tải được dữ liệu. Hãy kiểm tra kết nối mạng rồi bấm lại tên địa điểm.",
-  empty:"Chưa có thành phố nào. Bấm Thêm để chọn thành phố.",
+  empty:"Chưa có thành phố nào. Bấm Thêm để chọn thành phố.", findAddr:"Đang xác định địa chỉ...",
   updated:"cập nhật lúc", feels:"cảm giác như", hum:"Độ ẩm", wind:"Gió", cloud:"Mây che phủ", precip:"Lượng mưa", air:"Không khí",
   hourly:"Theo giờ", next24:"24 giờ tới (từ {h}:00)", fullDay:"(0h – 23h)",
   tTemp:"Nhiệt độ", tRain:"Khả năng mưa", tWind:"Gió (km/h)",
@@ -132,7 +135,7 @@ en:{
   none:"Not found. Try another name.", netErr:"Search failed. Please check your connection.",
   locating:"Getting your location...", noLoc:"Could not get your location. Allow location access in your browser, then reload the page.",
   loading:"Loading data...", loadErr:"Could not load data. Check your connection, then tap the place name again.",
-  empty:"No city yet. Tap Add to choose one.",
+  empty:"No city yet. Tap Add to choose one.", findAddr:"Finding address...",
   updated:"updated at", feels:"feels like", hum:"Humidity", wind:"Wind", cloud:"Cloud cover", precip:"Rainfall", air:"Air quality",
   hourly:"Hourly", next24:"next 24 hours (from {h}:00)", fullDay:"(0:00 – 23:00)",
   tTemp:"Temperature", tRain:"Chance of rain", tWind:"Wind (km/h)",
@@ -272,13 +275,34 @@ function capNhatGio(){
   document.getElementById("gioVe").innerHTML = veGio();
 }
 
+// Hiện địa chỉ đầy đủ của nơi đang chọn.
+// Vị trí điện thoại: tra tên nơi từ tọa độ (BigDataCloud, miễn phí). Thành phố đã thêm: dùng địa chỉ lưu lúc thêm.
+async function veDiaChi(){
+  const el = document.getElementById("diachi");
+  if(!chon){ el.textContent = ""; return; }
+  const p = chon, L = lang;
+  if(p!==viTri){ el.textContent = "📍 " + (p.diaChi || p.name); return; }
+  p.dc = p.dc || {};
+  if(p.dc[L]){ el.textContent = "📍 " + p.dc[L]; return; }
+  el.textContent = "📍 " + t("findAddr");
+  let a = p.lat.toFixed(3) + ", " + p.lon.toFixed(3);   // nếu tra không được thì hiện tọa độ
+  try{
+    const r = await fetch("https://api.bigdatacloud.net/data/reverse-geocode-client?latitude="+p.lat+"&longitude="+p.lon+"&localityLanguage="+L).then(r=>r.json());
+    const ds = [r.locality, r.city, r.principalSubdivision, r.countryName].filter(Boolean);
+    const rieng = ds.filter((v,i)=>ds.indexOf(v)===i);
+    if(rieng.length) a = rieng.join(", ");
+  }catch(e){}
+  p.dc[L] = a;
+  if(chon===p && lang===L) el.textContent = "📍 " + a;
+}
+
 // ----- Danh sách thành phố -----
 function luu(){ try{ localStorage.setItem("tpDaLuu", JSON.stringify(daLuu)); }catch(e){} }
 
 function moDauTien(){
   const ds = tatCa();
   if(ds.length){ tai(ds[0]); return; }
-  chon = null; DL = null; out.innerHTML = ""; veTabs();
+  chon = null; DL = null; out.innerHTML = ""; veTabs(); veDiaChi();
   setMsg("empty");
   tim.hidden = false;
 }
@@ -322,7 +346,8 @@ q.oninput = ()=>{
       ds.forEach(o=>{
         const li = document.createElement("li");
         li.textContent = [o.name,o.admin1,o.country].filter(Boolean).join(", ");
-        li.onclick = ()=>themTP({name:o.name, lat:o.latitude, lon:o.longitude});
+        const dc = [o.name,o.admin2,o.admin1,o.country].filter(Boolean);
+        li.onclick = ()=>themTP({name:o.name, diaChi:dc.filter((v,i)=>dc.indexOf(v)===i).join(", "), lat:o.latitude, lon:o.longitude});
         gy.appendChild(li);
       });
     }catch(e){ gy.innerHTML = '<li class="trong">'+t("netErr")+'</li>'; }
@@ -370,7 +395,7 @@ async function layDuLieu(p){
 }
 
 async function tai(p){
-  chon = p; veTabs(); setMsg("loading"); out.innerHTML = "";
+  chon = p; veTabs(); veDiaChi(); setMsg("loading"); out.innerHTML = "";
   try{
     const {w, aqi, aqiNow} = await layDuLieu(p);
     if(chon!==p) return;   // bạn đã chuyển sang nơi khác trong lúc chờ
